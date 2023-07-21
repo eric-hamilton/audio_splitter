@@ -1,22 +1,25 @@
 import os
 import sys
 import re
-from scipy.io import wavfile
+import librosa
+import soundfile as sf
 
 class Splitter:
     def __init__(self):
-        self.amplitude_threshold = 500
+        self.amplitude_threshold = 10
         self.silence_threshold_ms = 100
         self.file_path = None
         self.sample_rate = None
         self.data = None
         self.clip_times = []
         self.file_extension = ".wav"
+        self.padding = 0
 
     def load_file(self, file_path):
         try:
             self.file_path = file_path
-            self.sample_rate, self.data = wavfile.read(file_path)
+            self.data, self.sample_rate = librosa.load(file_path, sr=None)
+            self.file_extension = os.path.splitext(file_path)[1]
             print(f"Loaded {file_path} successfully.\n")
         except Exception as e:
             print(f"Could not load file: {e}")
@@ -36,6 +39,8 @@ class Splitter:
         if self.prompt_continue():
             naming_convention = self.prompt_naming_convention()
             prefix = self.prompt_prefix()
+            self.prompt_padding()
+            
             print("Writing files.")
             self.write_files(naming_convention, prefix)
             print("Done!")
@@ -44,12 +49,29 @@ class Splitter:
                 name_suffix="_xx"
             elif naming_convention == "timestamps":
                 name_suffix="_x_x--x_x"
-                
+            
+            
             
             print(f"Files saved as {os.getcwd()}\\output\\{prefix}{name_suffix}{self.file_extension}")
         else:
             self.run()
-
+    def prompt_padding(self):
+        while True:
+            print("Add padding? Input in milliseconds\n")
+            padding = input()
+            if not padding:
+                self.padding = 0
+                return
+            else:
+                if padding.isdigit():
+                    self.padding = int(padding)
+                    return
+                elif padding.lower() in ["no", "n"]:
+                    self.padding = 0
+                    return
+                else:
+                    print("Padding value must be a digit")
+                
     def prompt_prefix(self):
         while True:
             print("\nType File Prefix.\n")
@@ -63,17 +85,17 @@ class Splitter:
 
     def prompt_amp_thresh(self):
         while True:
-            print("Select Amplitude Threshold. (0 - 32767)")
+            print("Select Amplitude Threshold. (0 - 1000)")
             amp_thresh = input(f"Current: {self.amplitude_threshold}\n")
             if not amp_thresh:
                 return
             if amp_thresh.isdigit():
-                if 0 <= int(amp_thresh) <= 32767:
+                if 0 <= int(amp_thresh) <= 1000:
                     self.amplitude_threshold = int(amp_thresh)
                     print()
                     return
                 else:
-                    print("Must be in range (0-32767)")
+                    print("Must be in range (0-1000)")
             else:
                 print("Must be an integer")
 
@@ -124,7 +146,6 @@ class Splitter:
     def split_clip_on_silence(self):
         """Populate the start and end times of audio based on the given thresholds
         """
-        
         silence_threshold_samples = int(self.silence_threshold_ms * self.sample_rate / 1000)
         sample_index = 0
         recording = False
@@ -137,7 +158,7 @@ class Splitter:
         running = True
         while running:
             try:
-                amplitude = abs(self.data[sample_index][0])
+                amplitude = abs(self.data[sample_index]) * 1000
             except IndexError as e:
                 running = False
                 silence_index = silence_threshold_samples + 1
@@ -165,10 +186,26 @@ class Splitter:
             sample_index += 1
 
     def write_files(self, naming_convention, prefix):
+        # Make output folder if it doesn't exist
         if not os.path.exists("output"):
             os.makedirs("output")
+        
+        # Calculate padding samples
+        padding = 0
+        if self.padding:
+            padding = int(self.padding * self.sample_rate / 1000)            
+            
         for clip_index, (start, end) in enumerate(self.clip_times):
-            clip_data = self.data[start:end]
+            start_padding = start - padding
+            end_padding = end + padding
+            
+            
+            start_padding = max(0, start_padding)
+            end_padding = min(len(self.data), end_padding)
+            if start_padding >= end_padding:
+                print("Skipping file with no length")
+                continue
+            clip_data = self.data[start_padding:end_padding]
             if naming_convention == "sequential":
                 filename = f"output/{prefix}_{clip_index+1}{self.file_extension}"
             elif naming_convention == "timestamps":                
@@ -184,7 +221,7 @@ class Splitter:
         return f"output/{prefix}_{start_time}--{end_time}{self.file_extension}"
 
     def save_file(self, filename, recorded_data):
-        wavfile.write(filename, self.sample_rate, recorded_data)
+        sf.write(filename, recorded_data, self.sample_rate)
 
     def is_valid_prefix(self, prefix):
         disallowed_chars = r'[\\/:\*\?"<>\|]'  # Slashes, backslashes, colons, asterisks, question marks, angle brackets, pipe
@@ -220,4 +257,4 @@ if __name__ == "__main__":
         else:
             print(f"Error: File '{filename}' not found.")
     else:
-        print("Usage: python splitter.py input_file.wav")
+        print("Usage: python splitter.py <input_file>")
