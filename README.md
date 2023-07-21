@@ -7,7 +7,7 @@ Python Audio Splitter is a simple utility designed to extract individual audio c
 ### Setup
 1. Clone the repository:
 ```
-git clone <repository_url>
+git clone https://github.com/eric-hamilton/python_audio_splitter.git
 ```
 
 2. Navigate to the folder:
